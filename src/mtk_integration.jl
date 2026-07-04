@@ -992,7 +992,20 @@ does include `operator_vars`).
 """
 function make_prune_factory(interp_infos)
     return function (parent_sys)
-        _apply_live_mask!(interp_infos, parent_sys)
+        # AUTO-PRUNE DISABLED (bugfix). `_apply_live_mask!` marked an interpolator
+        # live only if its variable appears in a compiled equation RHS / init eq /
+        # non-loader observed eq. Met fields consumed ONLY out-of-band by callbacks
+        # — notably GEOSFP `A1₊PBLH`, read solely by
+        # `EnvironmentalTransport.PBLMixingCallback`'s observed function — are in
+        # none of those, so they were pruned to `live[] = false`, leaving their data
+        # buffers at the zero sentinel. That silently zeroed PBL vertical mixing
+        # (`pblh ≈ 0 → imix = 1 → pbl_full_mix!` early-returns), trapping surface
+        # emissions in level 1 and titrating surface O3 to ~0. The factory here has
+        # no `CoupledSystem` access, so it cannot see `init_callbacks`' needed vars.
+        # Keep every interpolator live; they still load lazily on demand via
+        # `_update_one_interp!` / `_preload_interp!`. Callers wanting the met-load
+        # optimization can still call `prune_unused_interps!(loader, csys)` explicitly
+        # (which consults `operator_vars`).
         return nothing
     end
 end
